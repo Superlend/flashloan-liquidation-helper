@@ -5,8 +5,8 @@ import {FlashLoanSimpleReceiverBase} from "@aave/contracts/flashloan/base/FlashL
 import {IPoolAddressesProvider} from "@aave/contracts/interfaces/IPoolAddressesProvider.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {ISwapRouter} from "./dependencies/ISwapRouter.sol";
-import {TransferHelper} from "./dependencies/TransferHelper.sol";
+import {ISwapRouter} from "./dependencies/iguana/ISwapRouter.sol";
+import {TransferHelper} from "./dependencies/iguana/TransferHelper.sol";
 import {DataTypes} from "./DataTypes.sol";
 import {FlashLiquidationEncoding} from "./FlashLiquidationEncoding.sol";
 import {FlashLiquidationSwaps} from "./FlashLiquidationSwaps.sol";
@@ -74,6 +74,72 @@ contract FlashLiquidations is
             premium
         );
         return true;
+    }
+
+    /**
+     * @notice Initiates a flash loan-based liquidation
+     * @dev This is the main entry point for executing liquidations
+     * @param tokenAddress The address of the token to flash loan
+     * @param _amount The amount of tokens to flash loan
+     * @param colToken The address of the collateral token
+     * @param user The address of the user to liquidate
+     * @param poolFee1 The fee tier for the first pool in the swap path
+     * @param poolFee2 The fee tier for the second pool in the swap path (if using multi-hop)
+     * @param pathToken The intermediate token for multi-hop swaps
+     * @param usePath Whether to use a multi-hop swap path
+     */
+    function executeLiquidation(
+        address tokenAddress,
+        uint256 _amount,
+        address colToken,
+        address user,
+        uint24 poolFee1,
+        uint24 poolFee2,
+        address pathToken,
+        bool usePath
+    ) external {
+        address receiverAddress = address(this);
+        address asset = tokenAddress;
+        uint256 amount = _amount;
+        uint16 referralCode = 0;
+
+        bytes memory params = _encodeParams(
+            colToken,
+            asset,
+            user,
+            amount,
+            poolFee1,
+            poolFee2,
+            pathToken,
+            usePath
+        );
+
+        POOL.flashLoanSimple(
+            receiverAddress,
+            asset,
+            amount,
+            params,
+            referralCode
+        );
+
+        DataTypes.LiquidationParams memory decodedParams = _decodeParams(
+            params
+        );
+
+        uint256 allBalance = IERC20(decodedParams.collateralAsset).balanceOf(
+            address(this)
+        );
+        uint256 debtTokensRemaining = IERC20(decodedParams.borrowedAsset)
+            .balanceOf(address(this));
+
+        if (debtTokensRemaining > 0) {
+            IERC20(decodedParams.borrowedAsset).transfer(
+                msg.sender,
+                debtTokensRemaining
+            );
+        }
+
+        IERC20(decodedParams.collateralAsset).transfer(msg.sender, allBalance);
     }
 
     /**
@@ -172,68 +238,24 @@ contract FlashLiquidations is
     }
 
     /**
-     * @notice Initiates a flash loan-based liquidation
-     * @dev This is the main entry point for executing liquidations
-     * @param tokenAddress The address of the token to flash loan
-     * @param _amount The amount of tokens to flash loan
-     * @param colToken The address of the collateral token
-     * @param user The address of the user to liquidate
-     * @param poolFee1 The fee tier for the first pool in the swap path
-     * @param poolFee2 The fee tier for the second pool in the swap path (if using multi-hop)
-     * @param pathToken The intermediate token for multi-hop swaps
-     * @param usePath Whether to use a multi-hop swap path
+     * @notice Sets the vault address for a given hAsset
+     * @dev Only the owner can set the vault address
+     * @param hAsset The address of the hAsset
+     * @param vault The address of the vault
      */
-    function executeLiquidation(
-        address tokenAddress,
-        uint256 _amount,
-        address colToken,
-        address user,
-        uint24 poolFee1,
-        uint24 poolFee2,
-        address pathToken,
-        bool usePath
-    ) external {
-        address receiverAddress = address(this);
-        address asset = tokenAddress;
-        uint256 amount = _amount;
-        uint16 referralCode = 0;
+    function setHAssetToVault(
+        address hAsset,
+        address vault
+    ) external onlyOwner {
+        _setHAssetToVault(hAsset, vault);
+    }
 
-        bytes memory params = _encodeParams(
-            colToken,
-            asset,
-            user,
-            amount,
-            poolFee1,
-            poolFee2,
-            pathToken,
-            usePath
-        );
-
-        POOL.flashLoanSimple(
-            receiverAddress,
-            asset,
-            amount,
-            params,
-            referralCode
-        );
-
-        DataTypes.LiquidationParams memory decodedParams = _decodeParams(
-            params
-        );
-
-        uint256 allBalance = IERC20(decodedParams.collateralAsset).balanceOf(
-            address(this)
-        );
-        uint256 debtTokensRemaining = IERC20(decodedParams.borrowedAsset)
-            .balanceOf(address(this));
-
-        if (debtTokensRemaining > 0) {
-            IERC20(decodedParams.borrowedAsset).transfer(
-                msg.sender,
-                debtTokensRemaining
-            );
-        }
-
-        IERC20(decodedParams.collateralAsset).transfer(msg.sender, allBalance);
+    /**
+     * @notice Sets the swap router
+     * @dev Only the owner can set the swap router
+     * @param __swapRouter The address of the swap router
+     */
+    function setSwapRouter(ISwapRouter __swapRouter) external onlyOwner {
+        _setSwapRouter(__swapRouter);
     }
 }

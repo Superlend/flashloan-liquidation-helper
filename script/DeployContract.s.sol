@@ -3,7 +3,7 @@ pragma solidity ^0.8.0;
 
 import {FlashLiquidations} from "../src/flashLiquidations.sol";
 import {IPoolAddressesProvider} from "../lib/aave-v3-core/contracts/interfaces/IPoolAddressesProvider.sol";
-import {ISwapRouter} from "../src/dependencies/ISwapRouter.sol";
+import {ISwapRouter} from "../src/dependencies/iguana/ISwapRouter.sol";
 import {Script} from "forge-std/Script.sol";
 import {console} from "forge-std/console.sol";
 

@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {Test, console} from "forge-std/Test.sol";
 import {FlashLiquidations} from "../src/flashLiquidations.sol";
 import {IPoolAddressesProvider} from "../lib/aave-v3-core/contracts/interfaces/IPoolAddressesProvider.sol";
-import {ISwapRouter} from "../src/dependencies/ISwapRouter.sol";
+import {ISwapRouter} from "../src/dependencies/iguana/ISwapRouter.sol";
 import {IERC20} from "@aave/contracts/dependencies/openzeppelin/contracts/IERC20.sol";
 import {IPool} from "@aave/contracts/interfaces/IPool.sol";
 import {AaveOracle} from "@aave/contracts/misc/AaveOracle.sol";

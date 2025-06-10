@@ -1,21 +1,20 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {ISwapRouter} from "./dependencies/ISwapRouter.sol";
-import {TransferHelper} from "./dependencies/TransferHelper.sol";
+import {ISwapRouter} from "./dependencies/iguana/ISwapRouter.sol";
+import {TransferHelper} from "./dependencies/iguana/TransferHelper.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {FlashLiquidationStorage} from "./FlashLiquidationStorage.sol";
 
 /**
  * @title FlashLiquidationSwaps
  * @notice Abstract contract handling token swaps for liquidation operations
  * @dev Provides functionality to execute both single-hop and multi-hop swaps using Uniswap V3
  */
-abstract contract FlashLiquidationSwaps {
-    ISwapRouter public immutable swapRouter;
-
-    constructor(ISwapRouter _swapRouter) {
-        swapRouter = ISwapRouter(_swapRouter);
-    }
+abstract contract FlashLiquidationSwaps is FlashLiquidationStorage {
+    constructor(
+        ISwapRouter __swapRouter
+    ) FlashLiquidationStorage(__swapRouter) {}
 
     /**
      * @notice Executes a token swap with exact output amount
@@ -42,11 +41,11 @@ abstract contract FlashLiquidationSwaps {
     ) internal returns (uint256 amountIn) {
         TransferHelper.safeApprove(
             tokenIn,
-            address(swapRouter),
+            address(swapRouter()),
             amountInMaximum
         );
         require(
-            IERC20(tokenIn).allowance(address(this), address(swapRouter)) ==
+            IERC20(tokenIn).allowance(address(this), address(swapRouter())) ==
                 amountInMaximum,
             "FlashLiquidations: error while approving"
         );
@@ -64,7 +63,7 @@ abstract contract FlashLiquidationSwaps {
                     sqrtPriceLimitX96: 0
                 });
 
-            amountIn = swapRouter.exactOutputSingle(params);
+            amountIn = swapRouter().exactOutputSingle(params);
         } else {
             ISwapRouter.ExactOutputParams memory params = ISwapRouter
                 .ExactOutputParams({
@@ -81,11 +80,11 @@ abstract contract FlashLiquidationSwaps {
                     amountInMaximum: amountInMaximum
                 });
 
-            amountIn = swapRouter.exactOutput(params);
+            amountIn = swapRouter().exactOutput(params);
         }
 
         if (amountIn < amountInMaximum) {
-            TransferHelper.safeApprove(tokenIn, address(swapRouter), 0);
+            TransferHelper.safeApprove(tokenIn, address(swapRouter()), 0);
         }
 
         return amountIn;
