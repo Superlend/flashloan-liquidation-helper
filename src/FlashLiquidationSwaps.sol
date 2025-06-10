@@ -5,6 +5,11 @@ import {ISwapRouter} from "./dependencies/ISwapRouter.sol";
 import {TransferHelper} from "./dependencies/TransferHelper.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+/**
+ * @title FlashLiquidationSwaps
+ * @notice Abstract contract handling token swaps for liquidation operations
+ * @dev Provides functionality to execute both single-hop and multi-hop swaps using Uniswap V3
+ */
 abstract contract FlashLiquidationSwaps {
     ISwapRouter public immutable swapRouter;
 
@@ -13,11 +18,17 @@ abstract contract FlashLiquidationSwaps {
     }
 
     /**
-     * @notice This function swaps a minimum possible amount of DAI for fixed amount WETH
-     * @dev Calling address must approve this contract to spend DAI for this function to succeed will need to approve for slightly higher amount
-     * @param amountOut -> exact amount of WETH to receive from the swap
-     * @param amountInMaximum -> amount of DAI we want to spend to receive the specified amount of WETH
-     * @return amountIn -> amount of DAI accualy spent in swap
+     * @notice Executes a token swap with exact output amount
+     * @dev Supports both single-hop and multi-hop swaps through Uniswap V3
+     * @param tokenIn The address of the input token
+     * @param tokenOut The address of the output token
+     * @param amountOut The exact amount of output tokens to receive
+     * @param amountInMaximum The maximum amount of input tokens to spend
+     * @param poolFee1 The fee tier for the first pool in the swap path
+     * @param poolFee2 The fee tier for the second pool in the swap path (if using multi-hop)
+     * @param pathToken The intermediate token for multi-hop swaps
+     * @param usePath Whether to use a multi-hop swap path
+     * @return amountIn The actual amount of input tokens spent in the swap
      */
     function _executeSwap(
         address tokenIn,
