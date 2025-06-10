@@ -13,9 +13,10 @@ import {FlashLiquidationSwaps} from "./FlashLiquidationSwaps.sol";
 
 /**
  * @title FlashLiquidations
- * @notice Main contract for executing flash loan-based liquidations on Aave V3
+ * @notice Main contract for executing flash loan-based liquidations on Aave V3 with support for hAsset handling
  * @dev This contract combines flash loan functionality with liquidation and token swapping capabilities
  * It allows liquidators to execute liquidations using flash loans, optimizing capital efficiency
+ * Supports both regular assets and hAssets (Hanji protocol assets) for collateral
  */
 contract FlashLiquidations is
     FlashLoanSimpleReceiverBase,
@@ -161,6 +162,7 @@ contract FlashLiquidations is
     /**
      * @notice Internal function to execute the liquidation and token swaps
      * @dev Handles the core liquidation logic including token approvals, liquidation call, and token swaps
+     * Supports hAsset handling by validating and withdrawing from Hanji vaults when necessary
      * @param params The encoded parameters containing liquidation details
      * @param flashBorrowedAmount The amount borrowed via flash loan
      * @param premium The flash loan premium to be repaid
@@ -206,8 +208,6 @@ contract FlashLiquidations is
             uint256 amountOut = variables.flashLoanDebt -
                 variables.diffFlashBorrowedBalance;
 
-            // check if collateralAsset is hAsset and if yes, then withdraw liquidity from hanji's vault
-            // return the collateralAssetAddress from this function.
             (
                 address formattedCollateralAsset,
                 uint256 formattedCollateralAmount
@@ -242,6 +242,14 @@ contract FlashLiquidations is
         );
     }
 
+    /**
+     * @notice Populates the local variables needed for liquidation operations
+     * @dev Initializes balances and calculates flash loan debt
+     * @param params The liquidation parameters
+     * @param flashBorrowedAmount The amount borrowed via flash loan
+     * @param premium The flash loan premium
+     * @return variables The populated LiquidationCallLocalVars struct
+     */
     function _populateLiquidationCallLocalVars(
         DataTypes.LiquidationParams memory params,
         uint256 flashBorrowedAmount,

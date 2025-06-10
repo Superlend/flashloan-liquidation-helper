@@ -9,8 +9,9 @@ import {ILPManager} from "./dependencies/hanji/ILPManager.sol";
 
 /**
  * @title FlashLiquidationSwaps
- * @notice Abstract contract handling token swaps for liquidation operations
+ * @notice Abstract contract handling token swaps and hAsset operations for liquidation
  * @dev Provides functionality to execute both single-hop and multi-hop swaps using Uniswap V3
+ * Includes support for handling hAssets (Hanji protocol assets) through vault interactions
  */
 abstract contract FlashLiquidationSwaps is FlashLiquidationStorage {
     constructor(
@@ -91,6 +92,12 @@ abstract contract FlashLiquidationSwaps is FlashLiquidationStorage {
         return amountIn;
     }
 
+    /**
+     * @notice Validates if an asset is an hAsset and retrieves its underlying token address
+     * @dev Checks if the asset has an associated vault and retrieves token information
+     * @param collateral The address of the collateral asset to validate
+     * @return The underlying token address and token ID if it's an hAsset, otherwise returns the original address
+     */
     function _validateHAssetAndGetTokenAddress(
         address collateral
     ) internal view returns (address, uint8) {
@@ -102,11 +109,17 @@ abstract contract FlashLiquidationSwaps is FlashLiquidationStorage {
         return (collateral, 0);
     }
 
+    /**
+     * @notice Validates and withdraws hAssets from their respective vaults
+     * @dev If the collateral is an hAsset, withdraws liquidity from the Hanji vault
+     * @param collateral The address of the collateral asset
+     * @param amount The amount of collateral to process
+     * @return The underlying token address and the amount after withdrawal (if applicable)
+     */
     function _validateAndWithdrawHAsset(
         address collateral,
         uint256 amount
     ) internal returns (address, uint256) {
-        // check if collateral is hAsset, then fetch it's underlying asset
         (
             address tokenAddress,
             uint8 tokenId
@@ -114,7 +127,6 @@ abstract contract FlashLiquidationSwaps is FlashLiquidationStorage {
         address vault = hAssetToVault(collateral);
 
         if (tokenAddress != collateral) {
-            // approve the hAsset to the vault
             TransferHelper.safeApprove(collateral, vault, amount);
 
             uint256 removedAmount = ILPManager(vault).removeLiquidity(
@@ -128,7 +140,6 @@ abstract contract FlashLiquidationSwaps is FlashLiquidationStorage {
 
             return (tokenAddress, removedAmount);
         } else {
-            // no, then return the asset address as it is, no need to withdraw etc.
             return (collateral, amount);
         }
     }
