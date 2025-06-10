@@ -5,6 +5,7 @@ import {ISwapRouter} from "./dependencies/iguana/ISwapRouter.sol";
 import {TransferHelper} from "./dependencies/iguana/TransferHelper.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {FlashLiquidationStorage} from "./FlashLiquidationStorage.sol";
+import {ILPManager} from "./dependencies/hanji/ILPManager.sol";
 
 /**
  * @title FlashLiquidationSwaps
@@ -88,5 +89,47 @@ abstract contract FlashLiquidationSwaps is FlashLiquidationStorage {
         }
 
         return amountIn;
+    }
+
+    function _validateHAssetAndGetTokenAddress(
+        address collateral
+    ) internal view returns (address, uint8) {
+        address vault = hAssetToVault(collateral);
+        if (vault != address(0)) {
+            ILPManager.TokenInfo memory tokenInfo = ILPManager(vault).tokens(0);
+            return (tokenInfo.tokenAddress, 0);
+        }
+        return (collateral, 0);
+    }
+
+    function _validateAndWithdrawHAsset(
+        address collateral,
+        uint256 amount
+    ) internal returns (address, uint256) {
+        // check if collateral is hAsset, then fetch it's underlying asset
+        (
+            address tokenAddress,
+            uint8 tokenId
+        ) = _validateHAssetAndGetTokenAddress(collateral);
+        address vault = hAssetToVault(collateral);
+
+        if (tokenAddress != collateral) {
+            // approve the hAsset to the vault
+            TransferHelper.safeApprove(collateral, vault, amount);
+
+            uint256 removedAmount = ILPManager(vault).removeLiquidity(
+                tokenId,
+                amount,
+                0,
+                0,
+                block.timestamp,
+                new bytes[](0)
+            );
+
+            return (tokenAddress, removedAmount);
+        } else {
+            // no, then return the asset address as it is, no need to withdraw etc.
+            return (collateral, amount);
+        }
     }
 }

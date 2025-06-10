@@ -61,18 +61,7 @@ contract FlashLiquidations is
             asset == decodedParams.borrowedAsset,
             "FlashLiquidations: Wrong params passed - asset not the same"
         );
-        _executeLiquidation(
-            decodedParams.collateralAsset,
-            decodedParams.borrowedAsset,
-            decodedParams.user,
-            decodedParams.debtToCover,
-            decodedParams.poolFee1,
-            decodedParams.poolFee2,
-            decodedParams.pathToken,
-            decodedParams.usePath,
-            amount,
-            premium
-        );
+        _executeLiquidation(decodedParams, amount, premium);
         return true;
     }
 
@@ -126,7 +115,12 @@ contract FlashLiquidations is
             params
         );
 
-        uint256 allBalance = IERC20(decodedParams.collateralAsset).balanceOf(
+        (
+            address formattedCollateralAsset,
+
+        ) = _validateHAssetAndGetTokenAddress(decodedParams.collateralAsset);
+
+        uint256 allBalance = IERC20(formattedCollateralAsset).balanceOf(
             address(this)
         );
         uint256 debtTokensRemaining = IERC20(decodedParams.borrowedAsset)
@@ -139,102 +133,7 @@ contract FlashLiquidations is
             );
         }
 
-        IERC20(decodedParams.collateralAsset).transfer(msg.sender, allBalance);
-    }
-
-    /**
-     * @notice Internal function to execute the liquidation and token swaps
-     * @dev Handles the core liquidation logic including token approvals, liquidation call, and token swaps
-     * @param collateralAsset The address of the collateral asset received from liquidation
-     * @param borrowedAsset The address of the asset borrowed via flash loan
-     * @param user The address of the user being liquidated
-     * @param debtToCover The amount of debt to be liquidated
-     * @param poolFee1 The fee tier for the first pool in the swap path
-     * @param poolFee2 The fee tier for the second pool in the swap path (if using multi-hop)
-     * @param pathToken The intermediate token for multi-hop swaps
-     * @param usePath Whether to use a multi-hop swap path
-     * @param flashBorrowedAmount The amount borrowed via flash loan
-     * @param premium The flash loan premium to be repaid
-     */
-    function _executeLiquidation(
-        address collateralAsset,
-        address borrowedAsset,
-        address user,
-        uint256 debtToCover,
-        uint24 poolFee1,
-        uint24 poolFee2,
-        address pathToken,
-        bool usePath,
-        uint256 flashBorrowedAmount,
-        uint256 premium
-    ) internal {
-        DataTypes.LiquidationCallLocalVars memory variables;
-
-        variables.initCollateralBalance = IERC20(collateralAsset).balanceOf(
-            address(this)
-        );
-
-        if (collateralAsset != borrowedAsset) {
-            variables.initFlashBorrowedBalance = IERC20(borrowedAsset)
-                .balanceOf(address(this));
-            variables.borrowedAssetLeftovers =
-                variables.initFlashBorrowedBalance -
-                flashBorrowedAmount;
-        }
-
-        variables.flashLoanDebt = flashBorrowedAmount + premium;
-
-        require(
-            IERC20(borrowedAsset).approve(address(POOL), debtToCover),
-            "FlashLiquidations: Error while approving"
-        );
-
-        POOL.liquidationCall(
-            collateralAsset,
-            borrowedAsset,
-            user,
-            debtToCover,
-            false
-        );
-
-        uint256 collateralBalanceAfter = IERC20(collateralAsset).balanceOf(
-            address(this)
-        );
-        variables.diffCollateralBalance =
-            collateralBalanceAfter -
-            variables.initCollateralBalance;
-
-        if (collateralAsset != borrowedAsset) {
-            uint256 flashBorrowedAssetAfter = IERC20(borrowedAsset).balanceOf(
-                address(this)
-            );
-            variables.diffFlashBorrowedBalance =
-                flashBorrowedAssetAfter -
-                variables.borrowedAssetLeftovers;
-            uint256 amountOut = variables.flashLoanDebt -
-                variables.diffFlashBorrowedBalance;
-
-            variables.soldAmount = _executeSwap(
-                collateralAsset,
-                borrowedAsset,
-                amountOut,
-                variables.diffCollateralBalance,
-                poolFee1,
-                poolFee2,
-                pathToken,
-                usePath
-            );
-
-            variables.remainingTokens =
-                variables.diffCollateralBalance -
-                variables.soldAmount;
-        } else {
-            variables.remainingTokens =
-                variables.diffCollateralBalance -
-                premium;
-        }
-
-        IERC20(borrowedAsset).approve(address(POOL), variables.flashLoanDebt);
+        IERC20(formattedCollateralAsset).transfer(msg.sender, allBalance);
     }
 
     /**
@@ -257,5 +156,112 @@ contract FlashLiquidations is
      */
     function setSwapRouter(ISwapRouter __swapRouter) external onlyOwner {
         _setSwapRouter(__swapRouter);
+    }
+
+    /**
+     * @notice Internal function to execute the liquidation and token swaps
+     * @dev Handles the core liquidation logic including token approvals, liquidation call, and token swaps
+     * @param params The encoded parameters containing liquidation details
+     * @param flashBorrowedAmount The amount borrowed via flash loan
+     * @param premium The flash loan premium to be repaid
+     */
+    function _executeLiquidation(
+        DataTypes.LiquidationParams memory params,
+        uint256 flashBorrowedAmount,
+        uint256 premium
+    ) internal {
+        DataTypes.LiquidationCallLocalVars
+            memory variables = _populateLiquidationCallLocalVars(
+                params,
+                flashBorrowedAmount,
+                premium
+            );
+
+        require(
+            IERC20(params.borrowedAsset).approve(
+                address(POOL),
+                params.debtToCover
+            ),
+            "FlashLiquidations: Error while approving"
+        );
+
+        POOL.liquidationCall(
+            params.collateralAsset,
+            params.borrowedAsset,
+            params.user,
+            params.debtToCover,
+            false
+        );
+
+        variables.diffCollateralBalance =
+            IERC20(params.collateralAsset).balanceOf(address(this)) -
+            variables.initCollateralBalance;
+
+        if (params.collateralAsset != params.borrowedAsset) {
+            uint256 flashBorrowedAssetAfter = IERC20(params.borrowedAsset)
+                .balanceOf(address(this));
+            variables.diffFlashBorrowedBalance =
+                flashBorrowedAssetAfter -
+                variables.borrowedAssetLeftovers;
+            uint256 amountOut = variables.flashLoanDebt -
+                variables.diffFlashBorrowedBalance;
+
+            // check if collateralAsset is hAsset and if yes, then withdraw liquidity from hanji's vault
+            // return the collateralAssetAddress from this function.
+            (
+                address formattedCollateralAsset,
+                uint256 formattedCollateralAmount
+            ) = _validateAndWithdrawHAsset(
+                    params.collateralAsset,
+                    variables.diffCollateralBalance
+                );
+
+            variables.soldAmount = _executeSwap(
+                formattedCollateralAsset,
+                params.borrowedAsset,
+                amountOut,
+                formattedCollateralAmount,
+                params.poolFee1,
+                params.poolFee2,
+                params.pathToken,
+                params.usePath
+            );
+
+            variables.remainingTokens =
+                variables.diffCollateralBalance -
+                variables.soldAmount;
+        } else {
+            variables.remainingTokens =
+                variables.diffCollateralBalance -
+                premium;
+        }
+
+        IERC20(params.borrowedAsset).approve(
+            address(POOL),
+            variables.flashLoanDebt
+        );
+    }
+
+    function _populateLiquidationCallLocalVars(
+        DataTypes.LiquidationParams memory params,
+        uint256 flashBorrowedAmount,
+        uint256 premium
+    )
+        internal
+        view
+        returns (DataTypes.LiquidationCallLocalVars memory variables)
+    {
+        variables.initCollateralBalance = IERC20(params.collateralAsset)
+            .balanceOf(address(this));
+
+        if (params.collateralAsset != params.borrowedAsset) {
+            variables.initFlashBorrowedBalance = IERC20(params.borrowedAsset)
+                .balanceOf(address(this));
+            variables.borrowedAssetLeftovers =
+                variables.initFlashBorrowedBalance -
+                flashBorrowedAmount;
+        }
+
+        variables.flashLoanDebt = flashBorrowedAmount + premium;
     }
 }
