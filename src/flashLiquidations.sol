@@ -308,7 +308,7 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
     }
 
     /**
-     * @notice flashLoan func initialize a flashLoanSimple and passes the parameters needed to liquidate a position than transfers the collateral received to the owner of contract
+     * @notice executeLiquidation func initialize a flashLoanSimple and passes the parameters needed to liquidate a position than transfers the collateral received to the owner of contract
      * @param tokenAddress -> address of flash loaned token
      * @param _amount -> amount of flash loaned token
      * @param colToken -> address of collateral token received from liquidating the position
@@ -318,7 +318,7 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
      * @param pathToken -> token needed to be swap between tokens
      * @param usePath -> bool to decide between single and multihop swap
      */
-    function flashLoan(
+    function executeLiquidation(
         address tokenAddress,
         uint256 _amount,
         address colToken,
@@ -327,7 +327,7 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
         uint24 poolFee2,
         address pathToken,
         bool usePath
-    ) external onlyOwner {
+    ) external {
         address receiverAddress = address(this);
         address asset = tokenAddress;
         uint256 amount = _amount;
