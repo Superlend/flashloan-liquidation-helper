@@ -40,10 +40,10 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
 
     ISwapRouter public immutable swapRouter;
 
-    constructor(IPoolAddressesProvider _addressProvider, ISwapRouter _swapRouter)
-        FlashLoanSimpleReceiverBase(_addressProvider)
-        Ownable(msg.sender)
-    {
+    constructor(
+        IPoolAddressesProvider _addressProvider,
+        ISwapRouter _swapRouter
+    ) FlashLoanSimpleReceiverBase(_addressProvider) Ownable(msg.sender) {
         swapRouter = ISwapRouter(_swapRouter);
     }
 
@@ -56,16 +56,24 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
      * @param params -> The byte-encoded params passed when init flashloan
      * @return true if execution of operation seccess, else false
      */
-    function executeOperation(address asset, uint256 amount, uint256 premium, address initiator, bytes calldata params)
-        external
-        override
-        returns (bool)
-    {
-        require(msg.sender == address(POOL), "FlashLiquidations: Caller must be lending pool");
+    function executeOperation(
+        address asset,
+        uint256 amount,
+        uint256 premium,
+        address initiator,
+        bytes calldata params
+    ) external override returns (bool) {
+        require(
+            msg.sender == address(POOL),
+            "FlashLiquidations: Caller must be lending pool"
+        );
 
         LiquidationParams memory decodedParams = _decodeParams(params);
 
-        require(asset == decodedParams.borrowedAsset, "FlashLiquidations: Wrong params passed - asset not the same");
+        require(
+            asset == decodedParams.borrowedAsset,
+            "FlashLiquidations: Wrong params passed - asset not the same"
+        );
         _liquidateAndSwap(
             decodedParams.collateralAsset,
             decodedParams.borrowedAsset,
@@ -112,32 +120,55 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
         LiquidationCallLocalVars memory variables;
 
         // Initial collateral balance
-        variables.initCollateralBalance = IERC20(collateralAsset).balanceOf(address(this));
+        variables.initCollateralBalance = IERC20(collateralAsset).balanceOf(
+            address(this)
+        );
 
         // Check whether the initial balance of tokens was borrowed
         if (collateralAsset != borrowedAsset) {
-            variables.initFlashBorrowedBalance = IERC20(borrowedAsset).balanceOf(address(this));
-            variables.borrowedAssetLeftovers = variables.initFlashBorrowedBalance - flashBorrowedAmount;
+            variables.initFlashBorrowedBalance = IERC20(borrowedAsset)
+                .balanceOf(address(this));
+            variables.borrowedAssetLeftovers =
+                variables.initFlashBorrowedBalance -
+                flashBorrowedAmount;
         }
 
         // Calculate the amount which will be send back to Aave pool
         variables.flashLoanDebt = flashBorrowedAmount + premium;
 
         // Approve the pool to liquidate debt position
-        require(IERC20(borrowedAsset).approve(address(POOL), debtToCover), "FlashLiquidations: Error while approving");
+        require(
+            IERC20(borrowedAsset).approve(address(POOL), debtToCover),
+            "FlashLiquidations: Error while approving"
+        );
 
         // Liquidating the debt possition
-        POOL.liquidationCall(collateralAsset, borrowedAsset, user, debtToCover, false);
+        POOL.liquidationCall(
+            collateralAsset,
+            borrowedAsset,
+            user,
+            debtToCover,
+            false
+        );
 
         // Compare initial collateral balance with collateral balance after liquidation
-        uint256 collateralBalanceAfter = IERC20(collateralAsset).balanceOf(address(this));
-        variables.diffCollateralBalance = collateralBalanceAfter - variables.initCollateralBalance;
+        uint256 collateralBalanceAfter = IERC20(collateralAsset).balanceOf(
+            address(this)
+        );
+        variables.diffCollateralBalance =
+            collateralBalanceAfter -
+            variables.initCollateralBalance;
 
         // Calculate the swap and necessary collateral tokens to repay flashLoan
         if (collateralAsset != borrowedAsset) {
-            uint256 flashBorrowedAssetAfter = IERC20(borrowedAsset).balanceOf(address(this));
-            variables.diffFlashBorrowedBalance = flashBorrowedAssetAfter - variables.borrowedAssetLeftovers;
-            uint256 amountOut = variables.flashLoanDebt - variables.diffFlashBorrowedBalance;
+            uint256 flashBorrowedAssetAfter = IERC20(borrowedAsset).balanceOf(
+                address(this)
+            );
+            variables.diffFlashBorrowedBalance =
+                flashBorrowedAssetAfter -
+                variables.borrowedAssetLeftovers;
+            uint256 amountOut = variables.flashLoanDebt -
+                variables.diffFlashBorrowedBalance;
 
             variables.soldAmount = swapExactOutputSingle(
                 collateralAsset,
@@ -151,9 +182,13 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
             );
 
             // Check for tokens to transfer to contract owner
-            variables.remainingTokens = variables.diffCollateralBalance - variables.soldAmount;
+            variables.remainingTokens =
+                variables.diffCollateralBalance -
+                variables.soldAmount;
         } else {
-            variables.remainingTokens = variables.diffCollateralBalance - premium;
+            variables.remainingTokens =
+                variables.diffCollateralBalance -
+                premium;
         }
 
         // Approve for flash loan repayment
@@ -177,33 +212,46 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
         address pathToken,
         bool usePath
     ) internal returns (uint256 amountIn) {
-        TransferHelper.safeApprove(tokenIn, address(swapRouter), amountInMaximum);
+        TransferHelper.safeApprove(
+            tokenIn,
+            address(swapRouter),
+            amountInMaximum
+        );
         require(
-            IERC20(tokenIn).allowance(address(this), address(swapRouter)) == amountInMaximum,
+            IERC20(tokenIn).allowance(address(this), address(swapRouter)) ==
+                amountInMaximum,
             "FlashLiquidations: error while approving"
         );
 
         if (usePath == false) {
-            ISwapRouter.ExactOutputSingleParams memory params = ISwapRouter.ExactOutputSingleParams({
-                tokenIn: tokenIn,
-                tokenOut: tokenOut,
-                fee: poolFee1,
-                recipient: address(this),
-                deadline: block.timestamp,
-                amountOut: amountOut,
-                amountInMaximum: amountInMaximum,
-                sqrtPriceLimitX96: 0
-            });
+            ISwapRouter.ExactOutputSingleParams memory params = ISwapRouter
+                .ExactOutputSingleParams({
+                    tokenIn: tokenIn,
+                    tokenOut: tokenOut,
+                    fee: poolFee1,
+                    recipient: address(this),
+                    deadline: block.timestamp,
+                    amountOut: amountOut,
+                    amountInMaximum: amountInMaximum,
+                    sqrtPriceLimitX96: 0
+                });
 
             amountIn = swapRouter.exactOutputSingle(params);
         } else {
-            ISwapRouter.ExactOutputParams memory params = ISwapRouter.ExactOutputParams({
-                path: abi.encodePacked(tokenOut, poolFee2, pathToken, poolFee1, tokenIn),
-                recipient: address(this),
-                deadline: block.timestamp,
-                amountOut: amountOut,
-                amountInMaximum: amountInMaximum
-            });
+            ISwapRouter.ExactOutputParams memory params = ISwapRouter
+                .ExactOutputParams({
+                    path: abi.encodePacked(
+                        tokenOut,
+                        poolFee2,
+                        pathToken,
+                        poolFee1,
+                        tokenIn
+                    ),
+                    recipient: address(this),
+                    deadline: block.timestamp,
+                    amountOut: amountOut,
+                    amountInMaximum: amountInMaximum
+                });
 
             amountIn = swapRouter.exactOutput(params);
         }
@@ -220,7 +268,9 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
      * @param params -> params encoded in bytes form passed when initialize the flashloan
      * @return LiquidationParams memory struct
      */
-    function _decodeParams(bytes memory params) internal pure returns (LiquidationParams memory) {
+    function _decodeParams(
+        bytes memory params
+    ) internal pure returns (LiquidationParams memory) {
         (
             address collateralAsset,
             address borrowedAsset,
@@ -230,10 +280,31 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
             uint24 poolFee2,
             address pathToken,
             bool usePath
-        ) = abi.decode(params, (address, address, address, uint256, uint24, uint24, address, bool));
+        ) = abi.decode(
+                params,
+                (
+                    address,
+                    address,
+                    address,
+                    uint256,
+                    uint24,
+                    uint24,
+                    address,
+                    bool
+                )
+            );
 
         return
-            LiquidationParams(collateralAsset, borrowedAsset, user, debtToCover, poolFee1, poolFee2, pathToken, usePath);
+            LiquidationParams(
+                collateralAsset,
+                borrowedAsset,
+                user,
+                debtToCover,
+                poolFee1,
+                poolFee2,
+                pathToken,
+                usePath
+            );
     }
 
     /**
@@ -262,20 +333,41 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
         uint256 amount = _amount;
         uint16 referralCode = 0;
 
-        bytes memory params = abi.encode(colToken, asset, user, amount, poolFee1, poolFee2, pathToken, usePath);
+        bytes memory params = abi.encode(
+            colToken,
+            asset,
+            user,
+            amount,
+            poolFee1,
+            poolFee2,
+            pathToken,
+            usePath
+        );
 
         // Init flashLoanSimple
-        POOL.flashLoanSimple(receiverAddress, asset, amount, params, referralCode);
+        POOL.flashLoanSimple(
+            receiverAddress,
+            asset,
+            amount,
+            params,
+            referralCode
+        );
 
         // Transfering remaining collateral token after liquidation with flashloan being repaid
         LiquidationParams memory decodedParams = _decodeParams(params);
 
         // Transfer remaining debt and collateral to msg.sender
-        uint256 allBalance = IERC20(decodedParams.collateralAsset).balanceOf(address(this));
-        uint256 debtTokensRemaining = IERC20(decodedParams.borrowedAsset).balanceOf(address(this));
+        uint256 allBalance = IERC20(decodedParams.collateralAsset).balanceOf(
+            address(this)
+        );
+        uint256 debtTokensRemaining = IERC20(decodedParams.borrowedAsset)
+            .balanceOf(address(this));
 
         if (debtTokensRemaining > 0) {
-            IERC20(decodedParams.borrowedAsset).transfer(msg.sender, debtTokensRemaining);
+            IERC20(decodedParams.borrowedAsset).transfer(
+                msg.sender,
+                debtTokensRemaining
+            );
         }
 
         IERC20(decodedParams.collateralAsset).transfer(msg.sender, allBalance);
