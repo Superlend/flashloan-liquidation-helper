@@ -22,5 +22,14 @@ interface ILPManager {
         bytes[] calldata priceUpdateData
     ) external payable returns (uint256);
 
+    function addLiquidity(
+        uint8 tokenId,
+        uint256 amount,
+        uint256 minUsdValue,
+        uint256 minLPMinted,
+        uint256 expires,
+        bytes[] calldata priceUpdateData
+    ) external returns (uint256);
+
     function tokens(uint256 tokenId) external view returns (TokenInfo memory);
 }
