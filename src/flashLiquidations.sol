@@ -1,51 +1,30 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {IPool} from "@aave/contracts/interfaces/IPool.sol";
-import {IFlashLoanSimpleReceiver} from "@aave/contracts/flashloan/interfaces/IFlashLoanSimpleReceiver.sol";
-import {AaveProtocolDataProvider} from "@aave/contracts/misc/AaveProtocolDataProvider.sol";
-import {AaveOracle} from "@aave/contracts/misc/AaveOracle.sol";
 import {FlashLoanSimpleReceiverBase} from "@aave/contracts/flashloan/base/FlashLoanSimpleReceiverBase.sol";
 import {IPoolAddressesProvider} from "@aave/contracts/interfaces/IPoolAddressesProvider.sol";
-import {IERC20} from "@aave/contracts/dependencies/openzeppelin/contracts/IERC20.sol";
-import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
-import {TransferHelper} from "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
+import {ISwapRouter} from "./dependencies/ISwapRouter.sol";
+import {TransferHelper} from "./dependencies/TransferHelper.sol";
+import {DataTypes} from "./DataTypes.sol";
+import {FlashLiquidationEncoding} from "./FlashLiquidationEncoding.sol";
+import {FlashLiquidationSwaps} from "./FlashLiquidationSwaps.sol";
 
-contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
-    /// Parameters used for _liquidateAndSwap and final transfer of funds to owner
-    struct LiquidationParams {
-        address collateralAsset;
-        address borrowedAsset;
-        address user;
-        uint256 debtToCover;
-        uint24 poolFee1;
-        uint24 poolFee2;
-        address pathToken;
-        bool usePath;
-    }
-
-    ///Parameters used for liquidation and swap logic
-    struct LiquidationCallLocalVars {
-        uint256 initFlashBorrowedBalance;
-        uint256 diffFlashBorrowedBalance;
-        uint256 initCollateralBalance;
-        uint256 diffCollateralBalance;
-        uint256 flashLoanDebt;
-        uint256 soldAmount;
-        uint256 remainingTokens;
-        uint256 borrowedAssetLeftovers;
-    }
-
-    ISwapRouter public immutable swapRouter;
-
+contract FlashLiquidations is
+    FlashLoanSimpleReceiverBase,
+    Ownable,
+    FlashLiquidationEncoding,
+    FlashLiquidationSwaps
+{
     constructor(
         IPoolAddressesProvider _addressProvider,
         ISwapRouter _swapRouter
-    ) FlashLoanSimpleReceiverBase(_addressProvider) Ownable(msg.sender) {
-        swapRouter = ISwapRouter(_swapRouter);
-    }
+    )
+        FlashLoanSimpleReceiverBase(_addressProvider)
+        Ownable(msg.sender)
+        FlashLiquidationSwaps(_swapRouter)
+    {}
 
     /**
      * @notice This function executes the operation after receiving assets in form of Flash loan
@@ -60,7 +39,7 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
         address asset,
         uint256 amount,
         uint256 premium,
-        address initiator,
+        address,
         bytes calldata params
     ) external override returns (bool) {
         require(
@@ -68,13 +47,15 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
             "FlashLiquidations: Caller must be lending pool"
         );
 
-        LiquidationParams memory decodedParams = _decodeParams(params);
+        DataTypes.LiquidationParams memory decodedParams = _decodeParams(
+            params
+        );
 
         require(
             asset == decodedParams.borrowedAsset,
             "FlashLiquidations: Wrong params passed - asset not the same"
         );
-        _liquidateAndSwap(
+        _executeLiquidation(
             decodedParams.collateralAsset,
             decodedParams.borrowedAsset,
             decodedParams.user,
@@ -103,7 +84,7 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
      * @param flashBorrowedAmount -> amount that was borrowed via flashloan
      * @param premium -> fee for taking out flashloan
      */
-    function _liquidateAndSwap(
+    function _executeLiquidation(
         address collateralAsset,
         address borrowedAsset,
         address user,
@@ -117,7 +98,7 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
     ) internal {
         // Approval for router to spend `amountInMaximum` of colateral
         // In prod the max amount should be spend based on oracles or other data sources to acheive better swap
-        LiquidationCallLocalVars memory variables;
+        DataTypes.LiquidationCallLocalVars memory variables;
 
         // Initial collateral balance
         variables.initCollateralBalance = IERC20(collateralAsset).balanceOf(
@@ -170,7 +151,9 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
             uint256 amountOut = variables.flashLoanDebt -
                 variables.diffFlashBorrowedBalance;
 
-            variables.soldAmount = swapExactOutputSingle(
+            // if collateral asset is hAsset => get wich asset it is => withdraw this asset from hanji vault => This underlying asset is the collateral asset now.
+
+            variables.soldAmount = _executeSwap(
                 collateralAsset,
                 borrowedAsset,
                 amountOut,
@@ -193,118 +176,6 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
 
         // Approve for flash loan repayment
         IERC20(borrowedAsset).approve(address(POOL), variables.flashLoanDebt);
-    }
-
-    /**
-     * @notice This function swaps a minimum possible amount of DAI for fixed amount WETH
-     * @dev Calling address must approve this contract to spend DAI for this function to succeed will need to approve for slightly higher amount
-     * @param amountOut -> exact amount of WETH to receive from the swap
-     * @param amountInMaximum -> amount of DAI we want to spend to receive the specified amount of WETH
-     * @return amountIn -> amount of DAI accualy spent in swap
-     */
-    function swapExactOutputSingle(
-        address tokenIn,
-        address tokenOut,
-        uint256 amountOut,
-        uint256 amountInMaximum,
-        uint24 poolFee1,
-        uint24 poolFee2,
-        address pathToken,
-        bool usePath
-    ) internal returns (uint256 amountIn) {
-        TransferHelper.safeApprove(
-            tokenIn,
-            address(swapRouter),
-            amountInMaximum
-        );
-        require(
-            IERC20(tokenIn).allowance(address(this), address(swapRouter)) ==
-                amountInMaximum,
-            "FlashLiquidations: error while approving"
-        );
-
-        if (usePath == false) {
-            ISwapRouter.ExactOutputSingleParams memory params = ISwapRouter
-                .ExactOutputSingleParams({
-                    tokenIn: tokenIn,
-                    tokenOut: tokenOut,
-                    fee: poolFee1,
-                    recipient: address(this),
-                    deadline: block.timestamp,
-                    amountOut: amountOut,
-                    amountInMaximum: amountInMaximum,
-                    sqrtPriceLimitX96: 0
-                });
-
-            amountIn = swapRouter.exactOutputSingle(params);
-        } else {
-            ISwapRouter.ExactOutputParams memory params = ISwapRouter
-                .ExactOutputParams({
-                    path: abi.encodePacked(
-                        tokenOut,
-                        poolFee2,
-                        pathToken,
-                        poolFee1,
-                        tokenIn
-                    ),
-                    recipient: address(this),
-                    deadline: block.timestamp,
-                    amountOut: amountOut,
-                    amountInMaximum: amountInMaximum
-                });
-
-            amountIn = swapRouter.exactOutput(params);
-        }
-
-        if (amountIn < amountInMaximum) {
-            TransferHelper.safeApprove(tokenIn, address(swapRouter), 0);
-        }
-
-        return amountIn;
-    }
-
-    /**
-     * @notice This func decodes the params obtained from myFlashLoan function
-     * @param params -> params encoded in bytes form passed when initialize the flashloan
-     * @return LiquidationParams memory struct
-     */
-    function _decodeParams(
-        bytes memory params
-    ) internal pure returns (LiquidationParams memory) {
-        (
-            address collateralAsset,
-            address borrowedAsset,
-            address user,
-            uint256 debtToCover,
-            uint24 poolFee1,
-            uint24 poolFee2,
-            address pathToken,
-            bool usePath
-        ) = abi.decode(
-                params,
-                (
-                    address,
-                    address,
-                    address,
-                    uint256,
-                    uint24,
-                    uint24,
-                    address,
-                    bool
-                )
-            );
-
-        return
-            LiquidationParams(
-                collateralAsset,
-                borrowedAsset,
-                user,
-                debtToCover,
-                poolFee1,
-                poolFee2,
-                pathToken,
-                usePath
-            );
     }
 
     /**
@@ -333,7 +204,7 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
         uint256 amount = _amount;
         uint16 referralCode = 0;
 
-        bytes memory params = abi.encode(
+        bytes memory params = _encodeParams(
             colToken,
             asset,
             user,
@@ -354,7 +225,9 @@ contract FlashLiquidations is FlashLoanSimpleReceiverBase, Ownable {
         );
 
         // Transfering remaining collateral token after liquidation with flashloan being repaid
-        LiquidationParams memory decodedParams = _decodeParams(params);
+        DataTypes.LiquidationParams memory decodedParams = _decodeParams(
+            params
+        );
 
         // Transfer remaining debt and collateral to msg.sender
         uint256 allBalance = IERC20(decodedParams.collateralAsset).balanceOf(
